@@ -1,12 +1,12 @@
 """
-test_integration.py — SwaraTTS 2 Flow Matching Integration Tests
+test_integration.py - SwaraTTS 2 Flow Matching Integration Tests
 ================================================================
 
 Run with:
     cd <project_root>          # the folder that CONTAINS the swara_tts/ package
     python test_integration.py
 
-All tests use CPU and synthetic tensors — no real data or GPU needed.
+All tests use CPU and synthetic tensors - no real data or GPU needed.
 """
 
 import sys, os
@@ -29,13 +29,13 @@ try:
         StyleVectorFieldNet,
         SinusoidalTimeEmbedding,
         SwaraTTS2,
+        SwaraTTS2Config,
         ISTFTDecoder,
         AdaIN,
     )
-    from swara_tts.swara_model import SwaraTTS2Config
-    print("✓  Package import OK\n")
+    print("[OK] Package import OK\n")
 except ImportError as e:
-    print(f"✗  Import failed: {e}")
+    print(f"[FAIL] Import failed: {e}")
     raise
 
 DEVICE = torch.device("cpu")
@@ -50,7 +50,7 @@ TEXT   = 768        # PL-BERT dim
 # =================================================================
 def test_1_sampler_standalone():
     print("=" * 55)
-    print("TEST 1 — OTCFMSampler standalone")
+    print("TEST 1 - OTCFMSampler standalone")
     print("=" * 55)
 
     sampler = OTCFMSampler(style_dim=STYLE, text_dim=TEXT).to(DEVICE)
@@ -62,21 +62,21 @@ def test_1_sampler_standalone():
     loss = sampler.compute_loss(x1, h_bert)
     assert loss.shape == torch.Size([]), f"Expected scalar, got {loss.shape}"
     assert not torch.isnan(loss), "Loss is NaN"
-    print(f"  [1a] Loss = {loss.item():.4f}  ✓")
+    print(f"  [1a] Loss = {loss.item():.4f}  [OK]")
 
     # 1b. Backprop
     loss.backward()
     total_norm = sum(
         p.grad.norm().item() for p in sampler.parameters() if p.grad is not None
     )
-    assert total_norm > 0, "Zero gradient — backprop broken"
-    print(f"  [1b] Gradient norm = {total_norm:.4f}  ✓")
+    assert total_norm > 0, "Zero gradient - backprop broken"
+    print(f"  [1b] Gradient norm = {total_norm:.4f}  [OK]")
 
     # 1c. Sample (inference)
     style = sampler.sample(h_bert, n_timesteps=5)
     assert style.shape == (B, STYLE), f"Bad shape: {style.shape}"
     assert not torch.isnan(style).any(), "Style NaN"
-    print(f"  [1c] style shape = {tuple(style.shape)}  ✓")
+    print(f"  [1c] style shape = {tuple(style.shape)}  [OK]")
 
     # 1d. Padding mask
     sampler.zero_grad()
@@ -84,7 +84,7 @@ def test_1_sampler_standalone():
     mask[0, -3:] = True   # last 3 tokens of sample 0 are padding
     loss_masked = sampler.compute_loss(x1, h_bert, text_mask=mask)
     loss_masked.backward()
-    print(f"  [1d] Padded-mask loss = {loss_masked.item():.4f}  ✓")
+    print(f"  [1d] Padded-mask loss = {loss_masked.item():.4f}  [OK]")
 
     print()
 
@@ -94,7 +94,7 @@ def test_1_sampler_standalone():
 # =================================================================
 def test_2_swara_model():
     print("=" * 55)
-    print("TEST 2 — SwaraTTS2 model")
+    print("TEST 2 - SwaraTTS2 model")
     print("=" * 55)
 
     cfg   = SwaraTTS2Config(fm_n_layers=2, fm_n_timesteps=5)
@@ -108,24 +108,24 @@ def test_2_swara_model():
     loss = model.compute_style_loss(x_real, h_bert)
     assert not torch.isnan(loss), "Loss NaN"
     loss.backward()
-    print(f"  [2a] compute_style_loss = {loss.item():.4f}  ✓")
+    print(f"  [2a] compute_style_loss = {loss.item():.4f}  [OK]")
 
     # 2b. sample_style
     style = model.sample_style(h_bert)
     assert style.shape == (B, STYLE)
-    print(f"  [2b] sample_style shape = {tuple(style.shape)}  ✓")
+    print(f"  [2b] sample_style shape = {tuple(style.shape)}  [OK]")
 
     # 2c. split_style
     s_a, s_p = model.split_style(style)
     assert s_a.shape == (B, STYLE // 2)
     assert s_p.shape == (B, STYLE // 2)
-    print(f"  [2c] split → s_a {tuple(s_a.shape)}, s_p {tuple(s_p.shape)}  ✓")
+    print(f"  [2c] split -> s_a {tuple(s_a.shape)}, s_p {tuple(s_p.shape)}  [OK]")
 
     # 2d. multi-speaker
     spk = torch.randn(B, STYLE)
     style_ms = model.sample_style(h_bert, speaker_emb=spk)
     assert style_ms.shape == (B, STYLE)
-    print(f"  [2d] multi-speaker style = {tuple(style_ms.shape)}  ✓")
+    print(f"  [2d] multi-speaker style = {tuple(style_ms.shape)}  [OK]")
 
     print()
 
@@ -135,7 +135,7 @@ def test_2_swara_model():
 # =================================================================
 def test_3_longform():
     print("=" * 55)
-    print("TEST 3 — Long-form generation")
+    print("TEST 3 - Long-form generation")
     print("=" * 55)
 
     model = SwaraTTS2(SwaraTTS2Config(fm_n_layers=2, fm_n_timesteps=3)).to(DEVICE)
@@ -151,11 +151,11 @@ def test_3_longform():
     assert len(styles) == 3
     for i, s in enumerate(styles):
         assert s.shape == (1, STYLE), f"Sentence {i} bad shape {s.shape}"
-    print(f"  [3a] {len(styles)} consistent style vectors  ✓")
+    print(f"  [3a] {len(styles)} consistent style vectors  [OK]")
 
     # Consecutive styles should differ (interpolation, not identical)
     assert not torch.allclose(styles[0], styles[1]), "Consecutive styles are identical"
-    print(f"  [3b] Styles are distinct  ✓")
+    print(f"  [3b] Styles are distinct  [OK]")
 
     print()
 
@@ -165,7 +165,7 @@ def test_3_longform():
 # =================================================================
 def test_4_training_loop_simulation():
     print("=" * 55)
-    print("TEST 4 — Training loop simulation")
+    print("TEST 4 - Training loop simulation")
     print("=" * 55)
 
     model = SwaraTTS2(SwaraTTS2Config(fm_n_layers=2)).to(DEVICE)
@@ -193,7 +193,7 @@ def test_4_training_loop_simulation():
         optim.step()
 
         print(f"  step {step+1}: loss_fm={loss_fm.item():.4f}, "
-              f"loss_total={loss_total.item():.4f}  ✓")
+              f"loss_total={loss_total.item():.4f}  [OK]")
 
     print()
 
@@ -203,7 +203,7 @@ def test_4_training_loop_simulation():
 # =================================================================
 def test_5_decoder_integration():
     print("=" * 55)
-    print("TEST 5 — ISTFTDecoder + SwaraTTS2 end-to-end shape")
+    print("TEST 5 - ISTFTDecoder + SwaraTTS2 end-to-end shape")
     print("=" * 55)
 
     STYLE_HALF = STYLE // 2   # 128, matches default decoder style_dim
@@ -236,11 +236,11 @@ def test_5_decoder_integration():
 
     # Generate style via flow matching
     style = model.sample_style(h_bert, n_timesteps=3)
-    s_a, s_p = model.split_style(style)  # s_a → decoder, s_p → predictors
+    s_a, s_p = model.split_style(style)  # s_a -> decoder, s_p -> predictors
 
     # Run decoder
     waveform = decoder(asr, f0, energy, s_a)
-    print(f"  [5a] waveform shape = {tuple(waveform.shape)}  ✓")
+    print(f"  [5a] waveform shape = {tuple(waveform.shape)}  [OK]")
     assert waveform.dim() == 3, "Expected [B, 1, T_audio]"
     assert waveform.shape[0] == B
     assert waveform.shape[1] == 1
@@ -261,5 +261,5 @@ if __name__ == "__main__":
     test_5_decoder_integration()
 
     print("=" * 55)
-    print("ALL INTEGRATION TESTS PASSED  ✓")
+    print("ALL INTEGRATION TESTS PASSED [OK]")
     print("=" * 55)
