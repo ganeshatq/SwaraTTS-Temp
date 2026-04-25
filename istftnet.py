@@ -637,13 +637,24 @@ class ISTFTDecoder(nn.Module):
         # Downsample F0 and N by 2× via strided conv
         f0 = self.f0_conv(f0_curve.unsqueeze(1))  # [B, 1, T/2]
         n_feat = self.n_conv(n.unsqueeze(1))  # [B, 1, T/2]
+        target_len = f0.shape[-1]
+
+        # Keep the decoder operating at the same half-rate time axis for all
+        # conditioning paths before the final upsample block restores frame rate.
+        if asr.shape[-1] != target_len:
+            asr = F.interpolate(
+                asr,
+                size=target_len,
+                mode="linear",
+                align_corners=False,
+            )
 
         # Encode
         x = torch.cat([asr, f0, n_feat], dim=1)  # [B, dim_in+2, T/2]
         x = self.encode(x, s)  # [B, hidden_dim, T/2]
 
         # ASR residual projection
-        asr_res = self.asr_res(asr)  # [B, asr_res_dim, T]
+        asr_res = self.asr_res(asr)  # [B, asr_res_dim, T/2]
 
         # Decode with residual injection
         inject_residual = True

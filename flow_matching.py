@@ -161,6 +161,7 @@ class StyleVectorFieldNet(nn.Module):
         t: Tensor,
         h_text: Tensor,
         speaker_emb: Optional[Tensor] = None,
+        text_mask: Optional[Tensor] = None,
     ) -> Tensor:
         """Predict the vector field v_t.
 
@@ -169,6 +170,8 @@ class StyleVectorFieldNet(nn.Module):
             t:           (B,)               flow time in [0, 1].
             h_text:      (B, N, text_dim)   PL-BERT phoneme embeddings.
             speaker_emb: (B, style_dim)     optional speaker embedding.
+            text_mask:   (B, N) bool        True = PAD position to ignore.
+                                            If None, all positions attend freely.
 
         Returns:
             v_t: (B, style_dim) predicted vector field.
@@ -195,13 +198,24 @@ class StyleVectorFieldNet(nn.Module):
         # f) Prepend query token to text sequence
         seq = torch.cat([query, text_hidden], dim=1)  # (B, N+1, hidden_dim)
 
-        # g) Transformer encoder (batch_first=True)
-        out = self.transformer(seq)           # (B, N+1, hidden_dim)
+        # g) Build src_key_padding_mask: query token is never masked
+        #    PyTorch convention: True = ignore this position
+        if text_mask is not None:
+            # Prepend False for the query token  (B, N+1)
+            query_mask = torch.zeros(
+                text_mask.size(0), 1, dtype=torch.bool, device=text_mask.device
+            )
+            full_mask = torch.cat([query_mask, text_mask], dim=1)  # (B, N+1)
+        else:
+            full_mask = None
 
-        # h) Take the first token as the style output
+        # h) Transformer encoder (batch_first=True)
+        out = self.transformer(seq, src_key_padding_mask=full_mask)  # (B, N+1, hidden_dim)
+
+        # i) Take the first token as the style output
         style_token = out[:, 0, :]            # (B, hidden_dim)
 
-        # i) Project back to style_dim
+        # j) Project back to style_dim
         v_t = self.out_proj(style_token)      # (B, style_dim)
         return v_t
 
@@ -278,6 +292,7 @@ class OTCFMSampler(nn.Module):
         x1: Tensor,
         h_text: Tensor,
         speaker_emb: Optional[Tensor] = None,
+        text_mask: Optional[Tensor] = None,
     ) -> Tensor:
         """Compute the OT-CFM training loss.
 
@@ -289,6 +304,7 @@ class OTCFMSampler(nn.Module):
             x1:          (B, style_dim)    real style vectors from the encoder.
             h_text:      (B, N, text_dim)  PL-BERT phoneme embeddings.
             speaker_emb: (B, style_dim)    optional speaker embedding.
+            text_mask:   (B, N) bool       True = pad position (ignored).
 
         Returns:
             loss: scalar tensor (MSE between predicted and target vector field).
@@ -309,7 +325,7 @@ class OTCFMSampler(nn.Module):
         u_t = x1 - (1.0 - self.sigma_min) * x0
 
         # 5. Predict vector field
-        v_t = self.net(x_t, t, h_text, speaker_emb)
+        v_t = self.net(x_t, t, h_text, speaker_emb, text_mask=text_mask)
 
         # 6. MSE loss
         return F.mse_loss(v_t, u_t)
@@ -325,6 +341,7 @@ class OTCFMSampler(nn.Module):
         speaker_emb: Optional[Tensor] = None,
         n_timesteps: int = 10,
         temperature: float = 1.0,
+        text_mask: Optional[Tensor] = None,
     ) -> Tensor:
         """Generate style vectors from text using the Euler ODE solver.
 
@@ -334,6 +351,7 @@ class OTCFMSampler(nn.Module):
             n_timesteps:  int               number of Euler steps (2–50).
             temperature:  float             scale of the initial noise (0.667
                                             is typical for Matcha-TTS).
+            text_mask:    (B, N) bool       True = pad position (ignored).
 
         Returns:
             x1_hat: (B, style_dim) generated style vectors.
@@ -351,7 +369,7 @@ class OTCFMSampler(nn.Module):
         for t_idx in range(n_timesteps):
             t_val = t_idx / n_timesteps
             t = torch.full((B,), t_val, device=device, dtype=dtype)
-            v = self.net(x, t, h_text, speaker_emb)
+            v = self.net(x, t, h_text, speaker_emb, text_mask=text_mask)
             x = x + v * dt
 
         return x
@@ -365,6 +383,7 @@ class OTCFMSampler(nn.Module):
         x1: Tensor,
         h_text: Tensor,
         speaker_emb: Optional[Tensor] = None,
+        text_mask: Optional[Tensor] = None,
     ) -> Tensor:
         """Alias for ``compute_loss`` for use in training loops.
 
@@ -372,11 +391,12 @@ class OTCFMSampler(nn.Module):
             x1:          (B, style_dim)    real style vectors from the encoder.
             h_text:      (B, N, text_dim)  PL-BERT phoneme embeddings.
             speaker_emb: (B, style_dim)    optional speaker embedding.
+            text_mask:   (B, N) bool       True = pad position (ignored).
 
         Returns:
             loss: scalar MSE tensor.
         """
-        return self.compute_loss(x1, h_text, speaker_emb)
+        return self.compute_loss(x1, h_text, speaker_emb, text_mask=text_mask)
 
     def __repr__(self) -> str:
         return (
